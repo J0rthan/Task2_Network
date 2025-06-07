@@ -24,8 +24,10 @@ def gbn_sender(client, server_addr, start_seq, ack_base_seq):
     def resend_packets():
         nonlocal total_send
         for i in range(base, next_seq):
-            pkt_len = unacked_packets.get(i)
-            data = b'A' * (pkt_len - 22)
+            pkt = unpack_packet(unacked_packets[i])
+            data = pkt['chunk']
+            chunk_start = pkt['data_start']
+            chunk_end = pkt['data_end']
             pkt = pack_packet(
                 src_port=client.getsockname()[1],
                 des_port=server_addr[1],
@@ -34,11 +36,13 @@ def gbn_sender(client, server_addr, start_seq, ack_base_seq):
                 type=TYPE_REQUEST,
                 window=window_byte_limit,
                 length=len(data),
+                data_start=chunk_start,
+                data_end=chunk_end,
                 chunk=data
             )
             client.sendto(pkt, server_addr)
             total_send += 1
-            print(f"重传第{i}个数据报")
+            print(f"重传第{i}个数据报(从第{chunk_start} ~ {chunk_end} 个字节)")
 
     def recv_ack_loop():
         nonlocal base
@@ -51,7 +55,7 @@ def gbn_sender(client, server_addr, start_seq, ack_base_seq):
                     ack_num = ack_pkt['ack_num']
                     elapsed_time = (time.time() - timer_start) * 1000
                     RTT_list.append(elapsed_time)
-                    print(f"第{ack_num}个数据报server端已收到，RTT是{elapsed_time:.4f}ms")
+                    print(f"第{ack_num}个数据报server端已收到(从第 {ack_pkt['data_start']} ~ {ack_pkt['data_end']} 个字节)，RTT是{elapsed_time:.4f}ms")
                     with lock:
                         base = ack_num + 1
 
@@ -74,6 +78,9 @@ def gbn_sender(client, server_addr, start_seq, ack_base_seq):
                     print("计时器触发超时")
                     resend_packets()
 
+    def total_window_bytes(unacked_packets):
+        return sum(len(pkt) for pkt in unacked_packets.values())
+
     base = 1
     next_seq = 1
     timer_start = None
@@ -81,6 +88,8 @@ def gbn_sender(client, server_addr, start_seq, ack_base_seq):
     total_send = 0
     RTT_list = []
     window_byte_limit = 400
+    x = 0  # data_start
+    y = 0  # data_end
     unacked_packets = {}
 
     # 启动接受进程
@@ -90,15 +99,22 @@ def gbn_sender(client, server_addr, start_seq, ack_base_seq):
 
     while base < 31:
         with lock:
-            while next_seq < 31 and sum(unacked_packets.values()) < window_byte_limit:
+            while next_seq < 31 and total_window_bytes(unacked_packets) < window_byte_limit:
                 if base == next_seq:
                     start_timer()
 
-                pkt_len = random.randint(40, 80)
-                if sum(unacked_packets.values()) + pkt_len > window_byte_limit:
+                pkt_len = random.randint(14, 54)  # header = 26 bytes
+                if total_window_bytes(unacked_packets) + pkt_len > window_byte_limit:
                     break
 
-                data = b'A' * (pkt_len - 22)
+                data = b'A' * (pkt_len)
+
+                if y == 0:
+                    x = y
+                else:
+                    x = y + 1
+                y = x + pkt_len + Header_size - 1
+
                 pkt = pack_packet(
                     src_port=client.getsockname()[1],
                     des_port=server_addr[1],
@@ -107,12 +123,14 @@ def gbn_sender(client, server_addr, start_seq, ack_base_seq):
                     type=TYPE_REQUEST,
                     window=window_byte_limit,
                     length=len(data),
+                    data_start=x,
+                    data_end=y,
                     chunk=data
                 )
 
                 client.sendto(pkt, server_addr)
-                print(f"第{next_seq}个数据报)已发送")
-                unacked_packets[next_seq] = pkt_len
+                print(f"第{next_seq}个数据报(从第{x} ~ {y} 个字节)已发送")
+                unacked_packets[next_seq] = pkt
                 total_send += 1
                 next_seq += 1
                 ack_base_seq += 1
@@ -164,8 +182,6 @@ def main():
     ack_num = 1
     window = 400
 
-    total_send = 0
-
     # 发送 SYN
     handshake_mes = pack_packet(
         src_port=client.getsockname()[1],
@@ -175,6 +191,8 @@ def main():
         type=TYPE_SYN,
         window=window,
         length=0,
+        data_start=0,
+        data_end=0,
         chunk=b''
     )
     client.sendto(handshake_mes, server_addr)
@@ -199,6 +217,8 @@ def main():
             type=TYPE_ACK,
             window=window,
             length=0,
+            data_start=0,
+            data_end=0,
             chunk=b''
         )
         client.sendto(final_ack, server_addr)
