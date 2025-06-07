@@ -24,14 +24,15 @@ def gbn_sender(client, server_addr, start_seq, ack_base_seq):
     def resend_packets():
         nonlocal total_send
         for i in range(base, next_seq):
-            data = b'A' * 58
+            pkt_len = unacked_packets.get(i)
+            data = b'A' * (pkt_len - 22)
             pkt = pack_packet(
                 src_port=client.getsockname()[1],
                 des_port=server_addr[1],
                 seq=start_seq + i,
                 ack_num=ack_base_seq,
                 type=TYPE_REQUEST,
-                window=window_size,
+                window=window_byte_limit,
                 length=len(data),
                 chunk=data
             )
@@ -54,9 +55,13 @@ def gbn_sender(client, server_addr, start_seq, ack_base_seq):
                     with lock:
                         base = ack_num + 1
 
+                        for seq in list(unacked_packets.keys()):
+                            if seq <= ack_num:
+                                del unacked_packets[seq]
+
                         if base == next_seq:
                             stop_timer()
-                        else:
+                        elif timer_start is None:
                             start_timer()
             except Exception as e:
                 print("[ERROR] 接收线程出错：", e)
@@ -75,7 +80,8 @@ def gbn_sender(client, server_addr, start_seq, ack_base_seq):
     lock = threading.Lock()
     total_send = 0
     RTT_list = []
-    window_size = 5
+    window_byte_limit = 400
+    unacked_packets = {}
 
     # 启动接受进程
     threading.Thread(target=recv_ack_loop, daemon=True).start()
@@ -84,24 +90,29 @@ def gbn_sender(client, server_addr, start_seq, ack_base_seq):
 
     while base < 31:
         with lock:
-            while next_seq < base + window_size and next_seq < 31:
+            while next_seq < 31 and sum(unacked_packets.values()) < window_byte_limit:
                 if base == next_seq:
                     start_timer()
 
-                data = 58 * b'A'
+                pkt_len = random.randint(40, 80)
+                if sum(unacked_packets.values()) + pkt_len > window_byte_limit:
+                    break
+
+                data = b'A' * (pkt_len - 22)
                 pkt = pack_packet(
                     src_port=client.getsockname()[1],
                     des_port=server_addr[1],
                     seq=start_seq + next_seq,
                     ack_num=ack_base_seq,
                     type=TYPE_REQUEST,
-                    window=window_size,
+                    window=window_byte_limit,
                     length=len(data),
                     chunk=data
                 )
 
                 client.sendto(pkt, server_addr)
-                print(f"第{next_seq}个数据报已发送")
+                print(f"第{next_seq}个数据报)已发送")
+                unacked_packets[next_seq] = pkt_len
                 total_send += 1
                 next_seq += 1
                 ack_base_seq += 1
@@ -194,7 +205,7 @@ def main():
         print("连接建立成功")
 
         # start GBN
-        total_send, RTT_list= gbn_sender(client, addr, seq_num, ack_num)
+        total_send, RTT_list = gbn_sender(client, addr, seq_num, ack_num)
 
         loss_rate = (1 - 30.0 / total_send) * 100
         Est_RTT = Estimated_RTT(RTT_list)

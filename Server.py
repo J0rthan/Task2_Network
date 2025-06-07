@@ -12,7 +12,7 @@ def gbn_receiver(serverSocket, data, client_addr, state: GBNState):
     print(f"server端收到数据 seq={pkt['seq'] - 2}，返回 ack={pkt['seq'] - 2}")
 
     if pkt['type'] == TYPE_REQUEST:
-        if random.random() < 0.2:
+        if random.random() < 0.1:
             print(f"server端模拟丢弃了第{pkt['seq'] - 2}个包")
             return
 
@@ -23,7 +23,7 @@ def gbn_receiver(serverSocket, data, client_addr, state: GBNState):
                 seq=state.expected_seq,
                 ack_num=state.expected_seq,
                 type=TYPE_ACK,
-                window=5,
+                window=400,
                 length=0,
                 chunk=b''
             )
@@ -54,7 +54,7 @@ def handle_client(serverSocket, client_addr, q: Queue):
             seq=0,
             ack_num=0,
             type=TYPE_ACK,
-            window=5,
+            window=400,
             length=0,
             chunk=b''
         )
