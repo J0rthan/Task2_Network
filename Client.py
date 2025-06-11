@@ -38,6 +38,22 @@ def gbn_sender(client, server_addr, start_seq, ack_base_seq):
                 length=len(data),
                 data_start=chunk_start,
                 data_end=chunk_end,
+                checksum=0,
+                chunk=data
+            )
+
+            checksum = calculate_checksum(pkt)
+            pkt = pack_packet(
+                src_port=client.getsockname()[1],
+                des_port=server_addr[1],
+                seq=start_seq + i,
+                ack_num=ack_base_seq,
+                type=TYPE_REQUEST,
+                window=window_byte_limit,
+                length=len(data),
+                data_start=chunk_start,
+                data_end=chunk_end,
+                checksum=checksum,
                 chunk=data
             )
             client.sendto(pkt, server_addr)
@@ -125,9 +141,26 @@ def gbn_sender(client, server_addr, start_seq, ack_base_seq):
                     length=len(data),
                     data_start=x,
                     data_end=y,
+                    checksum=0,
                     chunk=data
                 )
 
+                checksum = calculate_checksum(pkt)
+                pkt = pack_packet(
+                    src_port=client.getsockname()[1],
+                    des_port=server_addr[1],
+                    seq=start_seq + next_seq,
+                    ack_num=ack_base_seq,
+                    type=TYPE_REQUEST,
+                    window=window_byte_limit,
+                    length=len(data),
+                    data_start=x,
+                    data_end=y,
+                    checksum=checksum,
+                    chunk=data
+                )
+
+                pkt = maybe_corrupt_packet(pkt)  # 模拟损坏
                 client.sendto(pkt, server_addr)
                 print(f"第{next_seq}个数据报(从第{x} ~ {y} 个字节)已发送")
                 unacked_packets[next_seq] = pkt
@@ -193,8 +226,26 @@ def main():
         length=0,
         data_start=0,
         data_end=0,
+        checksum=0,
         chunk=b''
     )
+
+    checksum = calculate_checksum(handshake_mes)
+
+    handshake_mes = pack_packet(
+        src_port=client.getsockname()[1],
+        des_port=serverPort,
+        seq=seq_num,
+        ack_num=ack_num,
+        type=TYPE_SYN,
+        window=window,
+        length=0,
+        data_start=0,
+        data_end=0,
+        checksum=checksum,
+        chunk=b''
+    )
+
     client.sendto(handshake_mes, server_addr)
     print("发送 SYN")
 
@@ -219,6 +270,23 @@ def main():
             length=0,
             data_start=0,
             data_end=0,
+            checksum=0,
+            chunk=b''
+        )
+
+        checksum = calculate_checksum(final_ack)
+
+        final_ack = pack_packet(
+            src_port=client.getsockname()[1],
+            des_port=serverPort,
+            seq=seq_num,
+            ack_num=ack_num,
+            type=TYPE_ACK,
+            window=window,
+            length=0,
+            data_start=0,
+            data_end=0,
+            checksum=checksum,
             chunk=b''
         )
         client.sendto(final_ack, server_addr)

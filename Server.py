@@ -19,7 +19,8 @@ def gbn_receiver(serverSocket, data, client_addr, state: GBNState):
             print(f"server端模拟丢弃了第{pkt['seq'] - 2}个包")
             return
 
-        if pkt['seq'] - 2 == state.expected_seq:
+        print(f"it's not a corrupt: {notcorrupt(data)}")
+        if notcorrupt(data) and pkt['seq'] - 2 == state.expected_seq:
             snd_pkt = pack_packet(
                 src_port=8000,
                 des_port=client_addr[1],
@@ -30,14 +31,32 @@ def gbn_receiver(serverSocket, data, client_addr, state: GBNState):
                 length=0,
                 data_start=x,
                 data_end=y,
+                checksum=0,
                 chunk=b''
             )
+
+            checksum = calculate_checksum(snd_pkt)
+            snd_pkt = pack_packet(
+                src_port=8000,
+                des_port=client_addr[1],
+                seq=state.expected_seq,
+                ack_num=state.expected_seq,
+                type=TYPE_ACK,
+                window=400,
+                length=0,
+                data_start=x,
+                data_end=y,
+                checksum=checksum,
+                chunk=b''
+            )
+
             serverSocket.sendto(snd_pkt, client_addr)
             state.expected_seq += 1
             state.last_sndpkt = snd_pkt
             print(unpack_packet(state.last_sndpkt))
 
         else:
+            print(f"第{pkt['seq'] - 2} 个包可能发生损坏或者不是期望包")
             print(unpack_packet(state.last_sndpkt))
             serverSocket.sendto(state.last_sndpkt, client_addr)
 
@@ -49,6 +68,21 @@ def handle_client(serverSocket, client_addr, q: Queue):
     seq_server = 1
     ack_num_server = 1
     handshake_done = False
+
+    #  计算第一个last_sndpkt的checksum
+    checksum_of_first_last_sndpkt = calculate_checksum(pack_packet(
+        src_port=8000,
+        des_port=client_addr[1],
+        seq=0,
+        ack_num=0,
+        type=TYPE_ACK,
+        window=400,
+        length=0,
+        data_start=0,
+        data_end=0,
+        checksum=0,
+        chunk=b''
+    ))
 
     # GBN
     state = GBNState(
@@ -63,6 +97,7 @@ def handle_client(serverSocket, client_addr, q: Queue):
             length=0,
             data_start=0,
             data_end=0,
+            checksum=checksum_of_first_last_sndpkt,
             chunk=b''
         )
     )
@@ -81,12 +116,29 @@ def handle_client(serverSocket, client_addr, q: Queue):
                        seq=seq_server,
                        ack_num=packet['seq'] + 1,
                        type=TYPE_ACK,
-                       window=5,
+                       window=400,
                        length=0,
                        data_start=0,
                        data_end=0,
+                       checksum=0,
                        chunk=b''
                    )
+
+                   checksum = calculate_checksum(syn_ack)
+                   syn_ack = pack_packet(
+                       src_port=packet['des_port'],
+                       des_port=packet['src_port'],
+                       seq=seq_server,
+                       ack_num=packet['seq'] + 1,
+                       type=TYPE_ACK,
+                       window=400,
+                       length=0,
+                       data_start=0,
+                       data_end=0,
+                       checksum=checksum,
+                       chunk=b''
+                   )
+
                    serverSocket.sendto(syn_ack, client_addr)
                    seq_server += 1  # seq_server 加1
                    ack_num_server = packet['seq'] + 1
