@@ -119,7 +119,7 @@ def gbn_sender(client, server_addr, start_seq, ack_base_seq):
                 if base == next_seq:
                     start_timer()
 
-                pkt_len = random.randint(14, 54)  # header = 26 bytes
+                pkt_len = random.randint(12, 52)  # header = 28 bytes
                 if total_window_bytes(unacked_packets) + pkt_len > window_byte_limit:
                     break
 

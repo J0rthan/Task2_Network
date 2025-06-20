@@ -15,7 +15,7 @@ def gbn_receiver(serverSocket, data, client_addr, state: GBNState):
     y = pkt['data_end']
 
     if pkt['type'] == TYPE_REQUEST:
-        if random.random() < 0.1:
+        if random.random() < 0.005:
             print(f"server端模拟丢弃了第{pkt['seq'] - 2}个包")
             return
 
